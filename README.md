@@ -112,8 +112,6 @@ route_rules:
 主配置文件包含系统全局配置和配置文件目录设置：
 
 ```yaml
-server:
-  port: 80
 
 # 配置文件目录设置
 config_dir: "conf.d"
