@@ -1,0 +1,56 @@
+# 反向代理配置
+server:
+  # 端口配置现在在host_rules中定义
+  
+# 域名配置（nginx server块风格）
+host_rules:
+  - pattern: "hivision.txys.local"
+    port: 80
+    target: "hivision-service"
+    # 该域名的路由规则（nginx location块风格）
+    route_rules:
+      - pattern: "^/(gradio_api/queue/(join|data)|get_infos)$"
+        target: "local-8000"
+      - pattern: "/ijs/*"
+        target: "local-8000"
+      - pattern: "/"
+        target: "hivision-service"  # 根路径指向域名默认服务
+
+  - pattern: "tiktok.txys.local"
+    port: 80
+    target: "tiktok-service"
+    # 该域名的路由规则
+    route_rules:
+      - pattern: "/"
+        target: "tiktok-service"  # 根路径指向域名默认服务
+
+# 服务定义
+services:
+  hivision-service:
+    url: "http://hivision.s.dashixiezuo.com"
+    proxy_host: "hivision.s.dashixiezuo.com"  # 反向代理时使用的Host头
+  tiktok-service:
+    url: "http://tiktok.s.dashixiezuo.com"
+    proxy_host: "tiktok.s.dashixiezuo.com"  # 反向代理时使用的Host头
+  local-8000:
+    url: "http://127.0.0.1:8000"
+    # 本地服务不需要设置proxy_host
+
+# 中间件配置
+middlewares:  
+  # 日志中间件 - 记录请求日志
+  - name: "logging"
+    enabled: true
+    config:
+      level: "info"
+
+# 高级配置
+advanced:
+  # 连接超时设置
+  timeout:
+    read_timeout: 30
+    write_timeout: 30
+    dial_timeout: 30
+  port: 80
+  security:
+    deny_hidden_files: true
