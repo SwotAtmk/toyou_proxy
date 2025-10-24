@@ -9,6 +9,7 @@
 - ✅ **中间件系统**：支持认证、限流、CORS等中间件
 - ✅ **端口监听**：默认监听80端口，可配置
 - ✅ **服务发现**：支持动态服务配置和健康检查
+- ✅ **多文件配置**：支持类似nginx的配置文件目录结构
 - ✅ **高性能**：基于Go标准库，轻量高效
 
 ## 快速开始
@@ -103,6 +104,71 @@ route_rules:
     target: "product-service"
 ```
 
+### 多文件配置
+
+支持类似nginx的配置文件目录结构，便于管理多个域名的配置：
+
+#### 主配置文件 (config.yaml)
+主配置文件包含系统全局配置和配置文件目录设置：
+
+```yaml
+server:
+  port: 80
+
+# 配置文件目录设置
+config_dir: "conf.d"
+
+# 主配置文件 - 系统全局配置
+# 具体的域名和服务配置在conf.d目录下的配置文件中
+```
+
+#### 配置文件目录 (conf.d/)
+在 `conf.d` 目录下创建独立的配置文件，每个文件对应一个域名或服务：
+
+**示例：conf.d/hivision.yaml**
+```yaml
+host_rules:
+  - pattern: "hivision.txys.local"
+    port: 8080
+    target: "hivision-service"
+
+route_rules:
+  - pattern: "/api/*"
+    target: "hivision-service"
+  - pattern: "/admin/*"
+    target: "hivision-service"
+  - pattern: "/*"
+    target: "hivision-service"
+
+services:
+  "hivision-service":
+    url: "http://hivision.s.dashixiezuo.com"
+  "local-8000":
+    url: "http://localhost:8000"
+```
+
+**示例：conf.d/tiktok.yaml**
+```yaml
+host_rules:
+  - pattern: "tiktok.txys.local"
+    port: 8082
+    target: "tiktok-service"
+
+route_rules:
+  - pattern: "/*"
+    target: "tiktok-service"
+
+services:
+  "tiktok-service":
+    url: "http://tiktok.s.dashixiezuo.com"
+```
+
+#### 配置合并规则
+- **HostRules**: 合并所有配置文件中的域名规则
+- **Services**: 合并所有配置文件中的服务定义（支持覆盖）
+- **Middlewares**: 合并所有配置文件中的中间件配置
+- **RouteRules**: 合并所有配置文件中的路由规则
+
 ### 中间件配置
 
 支持多种中间件，可按需启用：
@@ -192,6 +258,69 @@ services:
     url: "http://localhost:3000"
   "admin-dev":
     url: "http://localhost:3001"
+```
+
+### 场景4：多文件配置管理（推荐）
+
+**主配置文件 config.yaml**
+```yaml
+server:
+  port: 80
+
+config_dir: "conf.d"
+
+# 系统全局配置
+middlewares:
+  - name: "logging"
+    enabled: true
+  - name: "cors"
+    enabled: true
+```
+
+**conf.d/api-services.yaml**
+```yaml
+host_rules:
+  - pattern: "api.company.com"
+    port: 8080
+    target: "api-gateway"
+
+route_rules:
+  - pattern: "/users/*"
+    target: "user-service"
+  - pattern: "/products/*"
+    target: "product-service"
+
+services:
+  "api-gateway":
+    url: "http://api-gateway:3000"
+  "user-service":
+    url: "http://user-service:3001"
+  "product-service":
+    url: "http://product-service:3002"
+```
+
+**conf.d/admin-services.yaml**
+```yaml
+host_rules:
+  - pattern: "admin.company.com"
+    port: 8081
+    target: "admin-service"
+
+services:
+  "admin-service":
+    url: "http://admin-service:4000"
+```
+
+**conf.d/static-services.yaml**
+```yaml
+host_rules:
+  - pattern: "static.company.com"
+    port: 8082
+    target: "static-service"
+
+services:
+  "static-service":
+    url: "http://static-service:5000"
 ```
 
 ## 中间件开发
