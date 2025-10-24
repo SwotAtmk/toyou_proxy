@@ -1,0 +1,22 @@
+# hivision.txys.local 域名配置
+host_rules:
+  - pattern: "hivision.txys.local"
+    port: 8080
+    target: "hivision-service"
+    # 该域名的路由规则（nginx location块风格）
+    route_rules:
+      - pattern: "^/(gradio_api/queue/(join|data)|get_infos)$"
+        target: "local-8000"
+      - pattern: "/ijs/*"
+        target: "local-8000"
+      - pattern: "/"
+        target: "hivision-service"  # 根路径指向域名默认服务
+
+# 服务定义
+services:
+  hivision-service:
+    url: "http://hivision.s.dashixiezuo.com"
+    proxy_host: "hivision.s.dashixiezuo.com"  # 反向代理时使用的Host头
+  local-8000:
+    url: "http://127.0.0.1:8000"
+    # 本地服务不需要设置proxy_host

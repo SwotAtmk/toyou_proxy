@@ -3,12 +3,17 @@ package config
 import (
 	"io/ioutil"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config 表示整个代理服务的配置
 type Config struct {
+	// 配置文件目录
+	ConfigDir string `yaml:"config_dir"`
 	// 域名匹配规则
 	HostRules []HostRule `yaml:"host_rules"`
 	// 路由匹配规则
@@ -69,6 +74,22 @@ type SecurityConfig struct {
 
 // LoadConfig 从文件加载配置
 func LoadConfig(filename string) (*Config, error) {
+	// 先加载单个配置文件
+	config, err := loadSingleConfig(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	// 如果配置了config_dir，则加载多文件配置
+	if config.ConfigDir != "" {
+		return loadMultiFileConfig(filename, config.ConfigDir)
+	}
+
+	return config, nil
+}
+
+// loadSingleConfig 加载单个配置文件（不处理多文件配置）
+func loadSingleConfig(filename string) (*Config, error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -81,6 +102,84 @@ func LoadConfig(filename string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+// loadMultiFileConfig 加载多文件配置
+func loadMultiFileConfig(mainConfigFile, configDir string) (*Config, error) {
+	// 获取主配置文件所在目录
+	mainDir := filepath.Dir(mainConfigFile)
+	fullConfigDir := filepath.Join(mainDir, configDir)
+
+	// 检查配置目录是否存在
+	if _, err := os.Stat(fullConfigDir); os.IsNotExist(err) {
+		log.Printf("配置目录不存在: %s，仅使用主配置文件", fullConfigDir)
+		return loadSingleConfig(mainConfigFile)
+	}
+
+	// 加载主配置
+	mainConfig, err := loadSingleConfig(mainConfigFile)
+	if err != nil {
+		return nil, err
+	}
+
+	// 扫描配置目录下的所有.yaml文件
+	files, err := ioutil.ReadDir(fullConfigDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// 合并所有配置
+	mergedConfig := mainConfig
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".yaml") {
+			configFile := filepath.Join(fullConfigDir, file.Name())
+			log.Printf("加载配置文件: %s", configFile)
+
+			partialConfig, err := loadSingleConfig(configFile)
+			if err != nil {
+				log.Printf("加载配置文件失败 %s: %v", configFile, err)
+				continue
+			}
+
+			// 合并配置
+			mergedConfig = mergeConfigs(mergedConfig, partialConfig)
+		}
+	}
+
+	return mergedConfig, nil
+}
+
+// mergeConfigs 合并两个配置
+func mergeConfigs(base, additional *Config) *Config {
+	merged := &Config{
+		ConfigDir:   base.ConfigDir,
+		HostRules:   append([]HostRule{}, base.HostRules...),
+		RouteRules:  append([]RouteRule{}, base.RouteRules...),
+		Middlewares: append([]Middleware{}, base.Middlewares...),
+		Advanced:    base.Advanced,
+	}
+
+	// 合并Services
+	if merged.Services == nil {
+		merged.Services = make(map[string]Service)
+	}
+	for k, v := range base.Services {
+		merged.Services[k] = v
+	}
+	for k, v := range additional.Services {
+		merged.Services[k] = v
+	}
+
+	// 合并HostRules
+	merged.HostRules = append(merged.HostRules, additional.HostRules...)
+
+	// 合并RouteRules
+	merged.RouteRules = append(merged.RouteRules, additional.RouteRules...)
+
+	// 合并Middlewares
+	merged.Middlewares = append(merged.Middlewares, additional.Middlewares...)
+
+	return merged
 }
 
 // Validate 验证配置的有效性

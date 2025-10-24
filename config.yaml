@@ -2,39 +2,11 @@
 server:
   # 端口配置现在在host_rules中定义
   
-# 域名配置（nginx server块风格）
-host_rules:
-  - pattern: "hivision.txys.local"
-    port: 80
-    target: "hivision-service"
-    # 该域名的路由规则（nginx location块风格）
-    route_rules:
-      - pattern: "^/(gradio_api/queue/(join|data)|get_infos)$"
-        target: "local-8000"
-      - pattern: "/ijs/*"
-        target: "local-8000"
-      - pattern: "/"
-        target: "hivision-service"  # 根路径指向域名默认服务
-
-  - pattern: "tiktok.txys.local"
-    port: 80
-    target: "tiktok-service"
-    # 该域名的路由规则
-    route_rules:
-      - pattern: "/"
-        target: "tiktok-service"  # 根路径指向域名默认服务
-
-# 服务定义
-services:
-  hivision-service:
-    url: "http://hivision.s.dashixiezuo.com"
-    proxy_host: "hivision.s.dashixiezuo.com"  # 反向代理时使用的Host头
-  tiktok-service:
-    url: "http://tiktok.s.dashixiezuo.com"
-    proxy_host: "tiktok.s.dashixiezuo.com"  # 反向代理时使用的Host头
-  local-8000:
-    url: "http://127.0.0.1:8000"
-    # 本地服务不需要设置proxy_host
+# 配置文件目录设置
+config_dir: "conf.d"  # 配置文件目录，系统会扫描该目录下的所有.yaml配置文件
+  
+# 主配置文件 - 系统全局配置
+# 具体的域名和服务配置在conf.d目录下的配置文件中
 
 # 中间件配置
 middlewares:  
