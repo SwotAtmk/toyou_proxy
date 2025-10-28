@@ -1,0 +1,16 @@
+{
+    "name": "sse",
+    "version": "1.0.0",
+    "description": "Server-Sent Events (SSE) support middleware with automatic detection",
+    "type": "middleware",
+    "entry": "plugin.go",
+    "config_schema": {
+        "type": "object",
+        "properties": {
+            "description": {
+                "type": "string",
+                "default": "This middleware automatically detects and handles Server-Sent Events (SSE) requests without requiring configuration"
+            }
+        }
+    }
+}

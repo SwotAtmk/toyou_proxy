@@ -100,10 +100,22 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Values:   make(map[string]interface{}),
 	}
 
+	// 自动检测SSE请求
+	isSSE := ph.detectSSERequest(r)
+	if isSSE {
+		ctx.Set("isSSEConnection", true)
+		log.Printf("SSE connection detected for: %s %s", r.Method, r.URL.Path)
+	}
+
 	// 确定目标服务和匹配的路由规则
 	targetService, hostRule, routeRule, err := ph.determineTarget(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		// 为SSE连接提供特殊错误处理
+		if isSSE {
+			ph.handleSSEError(w, err.Error())
+		} else {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
 		log.Printf("Failed to determine target: %v", err)
 		return
 	}
@@ -141,7 +153,12 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 创建反向代理，传递中间件上下文以支持replace中间件
 	proxy, err := ph.createReverseProxy(targetService, ctx)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		// 为SSE连接提供特殊错误处理
+		if isSSE {
+			ph.handleSSEError(w, err.Error())
+		} else {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+		}
 		log.Printf("Failed to create reverse proxy: %v", err)
 		return
 	}
@@ -198,6 +215,10 @@ func (ph *ProxyHandler) determineTarget(r *http.Request) (*config.Service, *conf
 	// 使用域名匹配器查找匹配的域名
 	targetServiceName, matched := ph.hostMatcher.Match(host)
 	if !matched {
+		// 检查是否是SSE请求，如果是则提供特殊错误处理
+		if ph.detectSSERequest(r) {
+			return nil, nil, nil, fmt.Errorf("SSE connection failed: no matching rule found for host: %s, path: %s", r.Host, r.URL.Path)
+		}
 		return nil, nil, nil, fmt.Errorf("no matching rule found for host: %s, path: %s", r.Host, r.URL.Path)
 	}
 
@@ -418,6 +439,20 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 
+	// 检查是否是SSE连接
+	isSSE := false
+	if ctx != nil {
+		if sseConn, exists := ctx.Get("isSSEConnection"); exists {
+			isSSE = sseConn.(bool)
+		}
+	}
+
+	// 为SSE连接设置刷新间隔
+	if isSSE {
+		proxy.FlushInterval = 100 * time.Millisecond
+		log.Printf("SSE connection detected, enabling streaming mode")
+	}
+
 	// 自定义修改请求 - 设置正确的Host头（二级代理场景）
 	proxy.Director = func(req *http.Request) {
 		// 保留原始请求的URL路径和查询参数
@@ -436,6 +471,11 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 		req.Header.Set("X-Forwarded-Proto", "http")
 		req.Header.Set("X-Forwarded-Host", req.Host)
 		req.Header.Set("X-Forwarded-For", req.RemoteAddr)
+
+		// 为SSE连接设置特殊头
+		if isSSE {
+			req.Header.Set("X-SSE-Proxy", "toyou-proxy")
+		}
 	}
 
 	// 自定义修改响应
@@ -443,6 +483,18 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 		// 添加代理相关响应头
 		resp.Header.Set("X-Proxy-By", "toyou-proxy")
 		resp.Header.Set("X-Target-Service", ph.getServiceName(service.URL))
+
+		// 为SSE响应设置特殊头
+		if isSSE {
+			resp.Header.Set("X-SSE-Proxy", "toyou-proxy")
+			// 确保不缓存SSE响应
+			resp.Header.Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			resp.Header.Set("Pragma", "no-cache")
+			resp.Header.Set("Expires", "0")
+
+			// 禁用缓冲（适用于某些代理服务器）
+			resp.Header.Set("X-Accel-Buffering", "no")
+		}
 
 		// 从上下文中获取替换规则
 		if ctx != nil {
@@ -472,6 +524,13 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 	// 自定义错误处理
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("Proxy error: %v", err)
+
+		// 为SSE连接提供特殊错误处理
+		if isSSE {
+			ph.handleSSEError(w, fmt.Sprintf("Proxy error: %v", err))
+			return
+		}
+
 		http.Error(w, "Service unavailable", http.StatusBadGateway)
 	}
 
@@ -481,6 +540,71 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 // applyReplaceRules 应用替换规则到响应内容
 func applyReplaceRules(content []byte, rules []middleware.ReplaceRule) []byte {
 	return middleware.ApplyReplaceRules(content, rules)
+}
+
+// detectSSERequest 检测是否是SSE请求
+func (ph *ProxyHandler) detectSSERequest(r *http.Request) bool {
+	// 1. 检查Accept头
+	acceptHeader := r.Header.Get("Accept")
+	if strings.Contains(acceptHeader, "text/event-stream") {
+		return true
+	}
+
+	// 2. 检查常见的SSE路径模式（精确匹配，避免误判）
+	path := strings.ToLower(r.URL.Path)
+
+	// 精确匹配SSE路径，避免包含SSE关键词的静态资源被误判
+	ssePaths := []string{
+		"/events", "/stream", "/sse", "/eventsource",
+		"/api/events", "/api/stream", "/api/sse",
+	}
+
+	// 检查是否精确匹配SSE路径
+	for _, ssePath := range ssePaths {
+		if path == ssePath {
+			return true
+		}
+	}
+
+	// 检查是否以SSE路径开头，后面有路径分隔符
+	for _, ssePath := range ssePaths {
+		if strings.HasPrefix(path, ssePath+"/") {
+			return true
+		}
+	}
+
+	// 3. 检查查询参数
+	query := r.URL.Query()
+	if query.Get("stream") == "true" || query.Get("sse") == "true" || query.Get("eventsource") == "true" {
+		return true
+	}
+
+	// 4. 检查Last-Event-ID头（SSE特有的头）
+	if r.Header.Get("Last-Event-ID") != "" {
+		return true
+	}
+
+	return false
+}
+
+// handleSSEError 处理SSE连接的错误
+func (ph *ProxyHandler) handleSSEError(w http.ResponseWriter, errorMsg string) {
+	// 设置SSE响应头
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	// 发送错误事件
+	fmt.Fprintf(w, "event: error\ndata: %s\n\n", errorMsg)
+
+	// 发送连接关闭事件
+	fmt.Fprintf(w, "event: close\ndata: Connection closed due to error\n\n")
+
+	// 刷新缓冲区
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // getServiceName 从URL中提取服务名称
