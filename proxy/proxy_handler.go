@@ -93,6 +93,13 @@ func NewProxyHandler(cfg *config.Config) (*ProxyHandler, error) {
 func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 
+	// 创建中间件上下文
+	ctx := &middleware.Context{
+		Request:  r,
+		Response: w,
+		Values:   make(map[string]interface{}),
+	}
+
 	// 确定目标服务和匹配的路由规则
 	targetService, hostRule, routeRule, err := ph.determineTarget(r)
 	if err != nil {
@@ -101,13 +108,9 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 创建中间件上下文
-	ctx := &middleware.Context{
-		Request:     r,
-		Response:    w,
-		TargetURL:   targetService.URL,
-		ServiceName: ph.getServiceName(targetService.URL),
-	}
+	// 设置初始目标服务到上下文
+	ctx.TargetURL = targetService.URL
+	ctx.ServiceName = ph.getServiceName(targetService.URL)
 
 	// 创建动态中间件链
 	dynamicMiddlewareChain := ph.createDynamicMiddlewareChain(hostRule, routeRule)
@@ -119,6 +122,20 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("Request aborted by middleware: %s %s", r.Method, r.URL.Path)
 		return
+	}
+
+	// 检查中间件是否修改了目标服务
+	if dynamicTarget, exists := ctx.Values["dynamic_target_service"]; exists {
+		if dynamicTargetServiceName, ok := dynamicTarget.(string); ok {
+			if service, serviceExists := ph.services[dynamicTargetServiceName]; serviceExists {
+				targetService = &service
+				ctx.TargetURL = targetService.URL
+				ctx.ServiceName = ph.getServiceName(targetService.URL)
+				log.Printf("Dynamic routing: redirected to service '%s'", dynamicTargetServiceName)
+			} else {
+				log.Printf("Dynamic routing: service '%s' not found, using original target", dynamicTargetServiceName)
+			}
+		}
 	}
 
 	// 创建反向代理，传递中间件上下文以支持replace中间件

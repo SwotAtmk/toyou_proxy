@@ -10,6 +10,5 @@ fi
 
 # 启动代理服务器
 echo "启动 Toyou Proxy 服务器..."
-echo "支持的域名: hivision.txys.link, tiktok.txys.local"
 echo "监听端口: 80"
 ./toyou-proxy

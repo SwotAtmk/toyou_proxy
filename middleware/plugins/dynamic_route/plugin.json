@@ -1,0 +1,12 @@
+{
+  "name": "dynamic_route",
+  "version": "1.0.0",
+  "description": "动态路由中间件，根据外部API响应动态调整请求的目标服务",
+  "entry_point": "PluginMain",
+  "config": {
+    "api_url": "http://127.0.0.1:7080/api/host",
+    "timeout_seconds": 5,
+    "cache_expiry_seconds": 60
+  },
+  "enabled": true
+}
