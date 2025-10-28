@@ -3,14 +3,25 @@ host_rules:
   - pattern: "hivision.txys.local"
     port: 8080
     target: "hivision-service"
+    middlewares:
+      - "logging"  # 域名级别启用日志中间件
+      - "cors"     # 域名级别启用CORS中间件
     # 该域名的路由规则（nginx location块风格）
     route_rules:
       - pattern: "^/(gradio_api/queue/(join|data)|get_infos)$"
         target: "local-8000"
+        middlewares:
+          - "rate_limit"  # 特定API路径启用限流中间件
       - pattern: "/ijs/*"
         target: "local-8000"
+      - pattern: "/api/*"
+        target: "hivision-service"  # API路径使用自定义中间件服务
+        middlewares:
+          - "strict_cors"  # 使用自定义严格CORS中间件服务
       - pattern: "/"
         target: "hivision-service"  # 根路径指向域名默认服务
+        middlewares:
+          - "logging"     # 根路径启用日志中间件
 
 # 服务定义
 services:
@@ -20,3 +31,28 @@ services:
   local-8000:
     url: "http://127.0.0.1:8000"
     # 本地服务不需要设置proxy_host
+
+# 中间件服务注册（支持自定义名称注册多个中间件服务）
+middleware_services:
+  - name: "strict_cors"
+    type: "cors"
+    enabled: true
+    is_global: false
+    description: "严格CORS策略中间件"
+    config:
+      allowed_origins:
+        - "https://hivision.txys.local"
+        - "https://api.txys.local"
+      allowed_methods:
+        - "GET"
+        - "POST"
+        - "PUT"
+  
+  - name: "high_rate_limit"
+    type: "rate_limit"
+    enabled: true
+    is_global: true
+    description: "高频率限流中间件"
+    config:
+      requests_per_minute: 1000
+      burst_size: 50

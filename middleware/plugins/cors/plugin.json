@@ -1,0 +1,11 @@
+{
+  "name": "cors",
+  "version": "1.0.0",
+  "description": "CORS中间件插件",
+  "type": "cors",
+  "config": {
+    "allowed_origins": ["*"],
+    "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+  },
+  "enabled": true
+}

@@ -1,6 +1,4 @@
 # 反向代理配置
-server:
-  # 端口配置现在在host_rules中定义
   
 # 配置文件目录设置
 config_dir: "conf.d"  # 配置文件目录，系统会扫描该目录下的所有.yaml配置文件
@@ -15,6 +13,21 @@ middlewares:
     enabled: true
     config:
       level: "info"
+
+  # 限流中间件 - 请求频率限制
+  - name: "rate_limit"
+    enabled: true
+    config:
+      requests_per_minute: 100
+      burst_size: 20
+  
+  # CORS中间件 - 跨域资源共享
+  - name: "cors"
+    enabled: true
+    config:
+      allowed_origins: ["*"]
+      allowed_methods: ["GET", "POST", "PUT", "DELETE"]
+      allowed_headers: ["Content-Type", "Authorization"]
 
 # 高级配置
 advanced:

@@ -79,8 +79,14 @@ func (s *Server) Start() error {
 	}
 
 	log.Printf("Listening on ports: %v", ports)
+	// 统计所有域名规则中的路由规则总数
+	totalRouteRules := 0
+	for _, hostRule := range s.config.HostRules {
+		totalRouteRules += len(hostRule.RouteRules)
+	}
+
 	log.Printf("Loaded %d host rules", len(s.config.HostRules))
-	log.Printf("Loaded %d route rules", len(s.config.RouteRules))
+	log.Printf("Loaded %d route rules", totalRouteRules)
 	log.Printf("Loaded %d services", len(s.config.Services))
 	log.Printf("Loaded %d middlewares", len(s.config.Middlewares))
 
@@ -152,10 +158,16 @@ func (s *Server) GetStatus() map[string]interface{} {
 		ports = append(ports, port)
 	}
 
+	// 统计所有域名规则中的路由规则总数
+	totalRouteRules := 0
+	for _, hostRule := range s.config.HostRules {
+		totalRouteRules += len(hostRule.RouteRules)
+	}
+
 	return map[string]interface{}{
 		"ports":       ports,
 		"host_rules":  len(s.config.HostRules),
-		"route_rules": len(s.config.RouteRules),
+		"route_rules": totalRouteRules,
 		"services":    len(s.config.Services),
 		"middlewares": len(s.config.Middlewares),
 		"running":     true,

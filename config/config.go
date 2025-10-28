@@ -22,22 +22,26 @@ type Config struct {
 	Services map[string]Service `yaml:"services"`
 	// 中间件配置
 	Middlewares []Middleware `yaml:"middlewares"`
+	// 中间件服务注册（支持自定义名称注册）
+	MiddlewareServices []MiddlewareService `yaml:"middleware_services"`
 	// 高级配置
 	Advanced AdvancedConfig `yaml:"advanced"`
 }
 
 // HostRule 域名匹配规则
 type HostRule struct {
-	Pattern    string      `yaml:"pattern"`
-	Port       int         `yaml:"port"`
-	Target     string      `yaml:"target"`
-	RouteRules []RouteRule `yaml:"route_rules,omitempty"`
+	Pattern     string      `yaml:"pattern"`
+	Port        int         `yaml:"port"`
+	Target      string      `yaml:"target"`
+	Middlewares []string    `yaml:"middlewares,omitempty"` // 域名级中间件装配
+	RouteRules  []RouteRule `yaml:"route_rules,omitempty"`
 }
 
 // RouteRule 路由匹配规则
 type RouteRule struct {
-	Pattern string `yaml:"pattern"`
-	Target  string `yaml:"target"`
+	Pattern     string   `yaml:"pattern"`
+	Target      string   `yaml:"target"`
+	Middlewares []string `yaml:"middlewares,omitempty"` // 路由级中间件装配
 }
 
 // Service 服务定义
@@ -51,6 +55,17 @@ type Middleware struct {
 	Name    string                 `yaml:"name"`
 	Enabled bool                   `yaml:"enabled"`
 	Config  map[string]interface{} `yaml:"config"`
+}
+
+// MiddlewareService 中间件服务定义，支持自定义名称注册
+// 这些中间件服务可以灵活挂载到各个路由规则进行使用
+type MiddlewareService struct {
+	Name        string                 `yaml:"name"`        // 中间件服务名称（自定义标识符）
+	Type        string                 `yaml:"type"`        // 中间件类型（auth、rate_limit、cors、logging等）
+	Enabled     bool                   `yaml:"enabled"`     // 是否启用
+	IsGlobal    bool                   `yaml:"is_global"`   // 是否全局加载（默认false）
+	Config      map[string]interface{} `yaml:"config"`      // 中间件配置
+	Description string                 `yaml:"description"` // 中间件描述（可选）
 }
 
 // AdvancedConfig 高级配置
@@ -152,11 +167,12 @@ func loadMultiFileConfig(mainConfigFile, configDir string) (*Config, error) {
 // mergeConfigs 合并两个配置
 func mergeConfigs(base, additional *Config) *Config {
 	merged := &Config{
-		ConfigDir:   base.ConfigDir,
-		HostRules:   append([]HostRule{}, base.HostRules...),
-		RouteRules:  append([]RouteRule{}, base.RouteRules...),
-		Middlewares: append([]Middleware{}, base.Middlewares...),
-		Advanced:    base.Advanced,
+		ConfigDir:          base.ConfigDir,
+		HostRules:          append([]HostRule{}, base.HostRules...),
+		RouteRules:         append([]RouteRule{}, base.RouteRules...),
+		Middlewares:        append([]Middleware{}, base.Middlewares...),
+		MiddlewareServices: append([]MiddlewareService{}, base.MiddlewareServices...),
+		Advanced:           base.Advanced,
 	}
 
 	// 合并Services
@@ -170,14 +186,18 @@ func mergeConfigs(base, additional *Config) *Config {
 		merged.Services[k] = v
 	}
 
-	// 合并HostRules
+	// 合并HostRules（包含嵌套的路由规则）
 	merged.HostRules = append(merged.HostRules, additional.HostRules...)
 
-	// 合并RouteRules
+	// 注意：RouteRules字段现在主要用于兼容性，实际的路由规则应该定义在HostRules的RouteRules字段中
+	// 合并RouteRules（主要用于兼容旧的配置格式）
 	merged.RouteRules = append(merged.RouteRules, additional.RouteRules...)
 
 	// 合并Middlewares
 	merged.Middlewares = append(merged.Middlewares, additional.Middlewares...)
+
+	// 合并MiddlewareServices
+	merged.MiddlewareServices = append(merged.MiddlewareServices, additional.MiddlewareServices...)
 
 	return merged
 }

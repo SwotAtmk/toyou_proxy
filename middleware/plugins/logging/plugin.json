@@ -1,0 +1,10 @@
+{
+  "name": "logging",
+  "version": "1.0.0",
+  "description": "日志中间件插件",
+  "type": "logging",
+  "config": {
+    "level": "debug"
+  },
+  "enabled": true
+}

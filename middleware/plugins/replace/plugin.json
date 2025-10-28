@@ -1,0 +1,16 @@
+{
+  "name": "replace",
+  "version": "1.0.0",
+  "description": "响应内容替换中间件插件",
+  "type": "replace",
+  "config": {
+    "rules": [
+      {
+        "pattern": "example",
+        "replacement": "replaced",
+        "global": false
+      }
+    ]
+  },
+  "enabled": true
+}
