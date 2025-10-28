@@ -188,7 +188,7 @@ func registerAllPlugins(factory middleware.MiddlewareFactory, autoPluginMgr *mid
 
 // determineTarget 确定目标服务，返回匹配的服务和路由规则信息
 func (ph *ProxyHandler) determineTarget(r *http.Request) (*config.Service, *config.HostRule, *config.RouteRule, error) {
-	// 1. 先尝试域名匹配（nginx策略：域名匹配优先）
+	// 1. 先尝试域名匹配（策略：域名匹配优先）
 	host := r.Host
 	// 移除端口号
 	if colonIndex := strings.Index(host, ":"); colonIndex != -1 {
