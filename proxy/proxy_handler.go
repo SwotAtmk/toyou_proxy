@@ -100,6 +100,13 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Values:   make(map[string]interface{}),
 	}
 
+	// 检测是否是WebSocket请求
+	isWebSocketRequest := ph.detectWebSocketRequest(r)
+	if isWebSocketRequest {
+		ctx.Set("isWebSocketConnection", true)
+		log.Printf("WebSocket request detected: %s %s", r.Method, r.URL.Path)
+	}
+
 	// 自动检测SSE请求
 	isSSE := ph.detectSSERequest(r)
 	if isSSE {
@@ -110,6 +117,12 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 确定目标服务和匹配的路由规则
 	targetService, hostRule, routeRule, err := ph.determineTarget(r)
 	if err != nil {
+		// 为WebSocket连接提供特殊错误处理
+		if isWebSocketRequest {
+			ph.handleWebSocketError(w, fmt.Sprintf("Target service not found: %v", err))
+			return
+		}
+
 		// 为SSE连接提供特殊错误处理
 		if isSSE {
 			ph.handleSSEError(w, err.Error())
@@ -123,6 +136,16 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 设置初始目标服务到上下文
 	ctx.TargetURL = targetService.URL
 	ctx.ServiceName = ph.getServiceName(targetService.URL)
+
+	// 如果是WebSocket请求，直接处理协议升级
+	if isWebSocketRequest {
+		err := ph.HandleWebSocketUpgrade(w, r, targetService)
+		if err != nil {
+			log.Printf("WebSocket upgrade failed: %v", err)
+			ph.handleWebSocketError(w, fmt.Sprintf("WebSocket upgrade failed: %v", err))
+		}
+		return
+	}
 
 	// 创建动态中间件链
 	dynamicMiddlewareChain := ph.createDynamicMiddlewareChain(hostRule, routeRule)
@@ -585,6 +608,45 @@ func (ph *ProxyHandler) detectSSERequest(r *http.Request) bool {
 	}
 
 	return false
+}
+
+// detectWebSocketRequest 检测是否是WebSocket请求
+func (ph *ProxyHandler) detectWebSocketRequest(r *http.Request) bool {
+	// 1. 检查Connection头
+	connection := strings.ToLower(r.Header.Get("Connection"))
+	if !strings.Contains(connection, "upgrade") {
+		return false
+	}
+
+	// 2. 检查Upgrade头
+	upgrade := strings.ToLower(r.Header.Get("Upgrade"))
+	if upgrade != "websocket" {
+		return false
+	}
+
+	// 3. 检查WebSocket版本
+	if r.Header.Get("Sec-WebSocket-Version") != "13" {
+		return false
+	}
+
+	// 4. 检查WebSocket密钥
+	if r.Header.Get("Sec-WebSocket-Key") == "" {
+		return false
+	}
+
+	return true
+}
+
+// handleWebSocketError 处理WebSocket连接的错误
+func (ph *ProxyHandler) handleWebSocketError(w http.ResponseWriter, errorMsg string) {
+	// 设置WebSocket错误响应头
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Connection", "close")
+	w.Header().Set("X-WebSocket-Error", "true")
+
+	// 发送错误响应
+	w.WriteHeader(http.StatusBadRequest)
+	fmt.Fprintf(w, "WebSocket Error: %s", errorMsg)
 }
 
 // handleSSEError 处理SSE连接的错误

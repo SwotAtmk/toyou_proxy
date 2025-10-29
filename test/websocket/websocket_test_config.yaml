@@ -1,0 +1,31 @@
+# Toyou Proxy 配置文件 - WebSocket测试
+
+# 监听配置
+listen:
+  host: "0.0.0.0"
+  port: 8080
+
+# 服务配置
+services:
+  "websocket-test":
+    url: "ws://localhost:8081"
+    proxy_host: "localhost:8081"
+
+# 域名规则
+host_rules:
+  - pattern: "localhost"
+    target: "websocket-test"
+    port: 8080
+    route_rules:
+      - pattern: "/ws"
+        target: "websocket-test"
+        middlewares: ["websocket"]
+
+# 中间件配置
+middlewares:
+  - name: "websocket"
+    enabled: true
+    config:
+      path_patterns: ["/ws", "/api/ws"]
+      connection_tracking: true
+      max_connections: 100

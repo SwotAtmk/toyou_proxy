@@ -1,16 +1,25 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"toyou-proxy/server"
 )
 
 func main() {
-	// 简化启动：直接使用默认配置文件
-	configPath := "config.yaml"
+	// 解析命令行参数
+	var configPath string
+	flag.StringVar(&configPath, "config", "config.yaml", "Path to configuration file")
+	flag.Parse()
+
+	// 检查配置文件是否存在
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		log.Fatalf("Configuration file not found: %s", configPath)
+	}
 
 	// 创建并启动服务器
 	srv, err := server.NewServer(configPath)

@@ -1,0 +1,16 @@
+{
+  "name": "websocket",
+  "version": "1.0.0",
+  "description": "WebSocket检测和代理中间件，支持HTTP到WebSocket的协议升级",
+  "entry_point": "PluginMain",
+  "config": {
+    "path_patterns": [
+      "/ws/*",
+      "/websocket/*",
+      "/socket.io/*"
+    ],
+    "enable_connection_tracking": true,
+    "max_connections": 1000
+  },
+  "enabled": true
+}

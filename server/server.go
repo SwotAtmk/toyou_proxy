@@ -70,7 +70,6 @@ func NewServer(configPath string) (*Server, error) {
 func (s *Server) Start() error {
 	// 记录配置信息
 	log.Printf("Starting Toyou Proxy Server...")
-	log.Printf("Configuration file: config.yaml")
 
 	// 获取所有监听的端口
 	ports := make([]int, 0, len(s.portMap))
