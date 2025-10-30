@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"toyou-proxy/config"
+	"toyou-proxy/loadbalancer"
 	"toyou-proxy/matcher"
 	"toyou-proxy/middleware"
 )
@@ -27,6 +28,7 @@ type ProxyHandler struct {
 	factory         middleware.MiddlewareFactory
 	autoPluginMgr   *middleware.AutoPluginManager // 自动插件管理器
 	cfg             *config.Config
+	loadBalancerMgr loadbalancer.LoadBalancerManager // 负载均衡器管理器
 }
 
 // NewProxyHandler 创建新的代理处理器
@@ -79,6 +81,26 @@ func NewProxyHandler(cfg *config.Config) (*ProxyHandler, error) {
 		log.Printf("Middleware %s loaded", mwConfig.Name)
 	}
 
+	// 创建负载均衡器管理器
+	loadBalancerMgr := loadbalancer.GetDefaultManager()
+
+	// 为所有配置了负载均衡的服务创建负载均衡器
+	for serviceName, service := range cfg.Services {
+		if lbConfig, hasLB := loadbalancer.ConvertServiceConfig(&service); hasLB {
+			// 设置默认值
+			loadbalancer.SetDefaultValues(&lbConfig)
+
+			// 创建负载均衡器
+			err := loadBalancerMgr.CreateLoadBalancer(serviceName, lbConfig)
+			if err != nil {
+				log.Printf("Failed to create load balancer for service %s: %v", serviceName, err)
+				continue
+			}
+
+			log.Printf("Load balancer created for service %s with strategy %s", serviceName, lbConfig.Strategy)
+		}
+	}
+
 	return &ProxyHandler{
 		hostMatcher:     hostMatcher,
 		services:        cfg.Services,
@@ -86,6 +108,7 @@ func NewProxyHandler(cfg *config.Config) (*ProxyHandler, error) {
 		factory:         factory,
 		autoPluginMgr:   autoPluginMgr,
 		cfg:             cfg,
+		loadBalancerMgr: loadBalancerMgr,
 	}, nil
 }
 
@@ -463,9 +486,32 @@ func (ph *ProxyHandler) createDynamicMiddlewareChain(hostRule *config.HostRule, 
 
 // createReverseProxy 创建反向代理
 func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middleware.Context) (*httputil.ReverseProxy, error) {
-	targetURL, err := url.Parse(service.URL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid target URL: %s", service.URL)
+	// 检查服务是否配置了负载均衡
+	serviceName := ph.getServiceName(service.URL)
+	lb, err := ph.loadBalancerMgr.GetLoadBalancer(serviceName)
+	hasLB := err == nil
+
+	var targetURL *url.URL
+
+	if hasLB {
+		// 使用负载均衡器选择后端
+		backend, err := lb.NextBackend(ctx.Request)
+		if err != nil {
+			return nil, fmt.Errorf("load balancer failed to select backend: %v", err)
+		}
+
+		targetURL, err = url.Parse(backend.URL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid backend URL: %s", backend.URL)
+		}
+
+		log.Printf("Load balancer selected backend: %s for service: %s", backend.URL, serviceName)
+	} else {
+		// 使用传统单一目标URL
+		targetURL, err = url.Parse(service.URL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid target URL: %s", service.URL)
+		}
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
@@ -506,6 +552,20 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 		// 为SSE连接设置特殊头
 		if isSSE {
 			req.Header.Set("X-SSE-Proxy", "toyou-proxy")
+		}
+
+		// 如果使用负载均衡，添加负载均衡相关头
+		if hasLB {
+			req.Header.Set("X-Load-Balancer", serviceName)
+			req.Header.Set("X-Backend-URL", targetURL.String())
+		}
+	}
+
+	// 如果使用负载均衡，包装传输层以记录响应时间和连接状态
+	if hasLB {
+		proxy.Transport = &loadbalancer.LoadBalancerTransport{
+			LoadBalancer: lb,
+			Transport:    http.DefaultTransport,
 		}
 	}
 
@@ -629,6 +689,16 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 	return proxy, nil
 }
 
+// getServiceName 根据URL获取服务名称
+func (ph *ProxyHandler) getServiceName(url string) string {
+	for name, service := range ph.services {
+		if service.URL == url {
+			return name
+		}
+	}
+	return "unknown"
+}
+
 // applyReplaceRules 应用替换规则到响应内容
 func applyReplaceRules(content []byte, rules []middleware.ReplaceRule) []byte {
 	return middleware.ApplyReplaceRules(content, rules)
@@ -736,14 +806,6 @@ func (ph *ProxyHandler) handleSSEError(w http.ResponseWriter, errorMsg string) {
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
-}
-
-// getServiceName 从URL中提取服务名称
-func (ph *ProxyHandler) getServiceName(urlStr string) string {
-	if u, err := url.Parse(urlStr); err == nil {
-		return u.Hostname()
-	}
-	return urlStr
 }
 
 // GetMiddlewareInfo 获取中间件信息

@@ -66,12 +66,138 @@ Toyou Proxy 是一个基于 Go 语言开发的反向代理服务器，采用"约
 - **环境隔离**：支持不同环境的配置分离
 - **配置验证**：提供配置验证和错误提示
 
-### 6. 服务发现
+### 服务发现
 
 - **静态服务**：支持静态配置后端服务
 - **动态服务**：支持从服务发现系统动态获取服务列表
 - **健康检查**：支持后端服务健康检查
 - **负载均衡**：支持多种负载均衡策略
+
+## 负载均衡功能
+
+Toyou Proxy 内置了强大的负载均衡功能，可以将流量分发到多个后端服务器，提高系统的可用性和性能。
+
+### 负载均衡策略
+
+1. **轮询（Round Robin）**
+   - 按顺序依次将请求分发到每个后端服务器
+   - 适用于后端服务器性能相近的场景
+   - 配置示例：
+     ```yaml
+     services:
+       my-service:
+         load_balancer:
+           strategy: "round_robin"
+           backends:
+             - url: "http://backend1:8080"
+             - url: "http://backend2:8080"
+             - url: "http://backend3:8080"
+     ```
+
+2. **加权轮询（Weighted Round Robin）**
+   - 根据权重比例分发请求，权重越高接收的请求越多
+   - 适用于后端服务器性能不同的场景
+   - 配置示例：
+     ```yaml
+     services:
+       my-service:
+         load_balancer:
+           strategy: "weighted_round_robin"
+           backends:
+             - url: "http://backend1:8080"
+               weight: 3  # 高性能服务器，权重为3
+             - url: "http://backend2:8080"
+               weight: 2  # 中等性能服务器，权重为2
+             - url: "http://backend3:8080"
+               weight: 1  # 低性能服务器，权重为1
+     ```
+
+3. **IP哈希（IP Hash）**
+   - 根据客户端IP地址的哈希值选择后端服务器
+   - 确保同一客户端的请求始终发送到同一服务器
+   - 适用于需要会话保持的场景
+   - 配置示例：
+     ```yaml
+     services:
+       my-service:
+         load_balancer:
+           strategy: "ip_hash"
+           backends:
+             - url: "http://backend1:8080"
+             - url: "http://backend2:8080"
+             - url: "http://backend3:8080"
+     ```
+
+4. **最少连接（Least Connections）**
+   - 将请求分发到当前连接数最少的后端服务器
+   - 适用于请求处理时间差异较大的场景
+   - 配置示例：
+     ```yaml
+     services:
+       my-service:
+         load_balancer:
+           strategy: "least_connections"
+           backends:
+             - url: "http://backend1:8080"
+             - url: "http://backend2:8080"
+             - url: "http://backend3:8080"
+     ```
+
+### 健康检查
+
+负载均衡器支持自动健康检查，可以定期检查后端服务器的健康状态，自动排除不健康的服务器：
+
+```yaml
+services:
+  my-service:
+    load_balancer:
+      strategy: "round_robin"
+      backends:
+        - url: "http://backend1:8080"
+          active: true
+        - url: "http://backend2:8080"
+          active: true
+        - url: "http://backend3:8080"
+          active: false  # 可以手动禁用某个后端
+      health_check:
+        enabled: true
+        interval: 10s    # 检查间隔
+        timeout: 5s      # 超时时间
+        path: "/health"  # 健康检查路径
+```
+
+### 完整配置示例
+
+```yaml
+services:
+  web-service:
+    url: "http://localhost:8080"  # 默认后端（可选）
+    load_balancer:
+      strategy: "round_robin"  # 负载均衡策略
+      backends:
+        - url: "http://backend1:8080"
+          weight: 2            # 权重（仅对加权轮询有效）
+          active: true         # 是否启用
+        - url: "http://backend2:8080"
+          weight: 1
+          active: true
+        - url: "http://backend3:8080"
+          weight: 1
+          active: true
+      health_check:
+        enabled: true
+        interval: 10s
+        timeout: 5s
+        path: "/health"
+
+host_rules:
+  - pattern: "example.com"
+    port: 80
+    target: "web-service"  # 指向上面定义的服务
+    route_rules:
+      - pattern: "/api/*"
+        target: "web-service"
+```
 
 ### 7. WebSocket代理
 
@@ -1207,7 +1333,201 @@ WebSocket代理中间件实现了以下安全措施：
 4. **资源管理**：监控连接数和资源使用情况，防止资源泄漏
 5. **安全配置**：限制允许的来源，使用安全的WebSocket协议(wss://)
 
-### 故障排除
+### 负载均衡使用示例
+
+以下是一个完整的负载均衡使用示例，展示如何快速设置和测试负载均衡功能。
+
+### 1. 准备后端服务
+
+假设我们有三个后端服务，分别运行在9001、9002和9003端口：
+
+```go
+// backend_server.go
+package main
+
+import (
+    "fmt"
+    "log"
+    "net/http"
+    "os"
+    "time"
+)
+
+func main() {
+    port := os.Args[1]
+    
+    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        time.Sleep(100 * time.Millisecond) // 模拟处理时间
+        fmt.Fprintf(w, "Response from backend server on port %s at %s", port, time.Now().Format(time.RFC3339))
+    })
+    
+    http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        fmt.Fprintf(w, "OK")
+    })
+    
+    log.Printf("Backend server starting on port %s", port)
+    log.Fatal(http.ListenAndServe(":"+port, nil))
+}
+```
+
+启动三个后端服务：
+
+```bash
+go run backend_server.go 9001 &
+go run backend_server.go 9002 &
+go run backend_server.go 9003 &
+```
+
+### 2. 配置负载均衡
+
+创建配置文件 `lb_config.yaml`：
+
+```yaml
+services:
+  web-service:
+    load_balancer:
+      strategy: "round_robin"  # 使用轮询策略
+      backends:
+        - url: "http://localhost:9001"
+          weight: 1
+          active: true
+        - url: "http://localhost:9002"
+          weight: 1
+          active: true
+        - url: "http://localhost:9003"
+          weight: 1
+          active: true
+      health_check:
+        enabled: true
+        interval: 10s
+        timeout: 5s
+        path: "/health"
+
+host_rules:
+  - pattern: "localhost"
+    port: 8080
+    target: "web-service"
+```
+
+### 3. 启动代理服务器
+
+```bash
+./toyou-proxy -config lb_config.yaml
+```
+
+### 4. 测试负载均衡
+
+发送多个请求，观察请求被分发到不同的后端服务器：
+
+```bash
+for i in {1..6}; do 
+  echo "Request $i:"
+  curl -s http://localhost:8080/
+  echo
+done
+```
+
+预期输出：
+
+```
+Request 1:
+Response from backend server on port 9001 at 2023-07-20T10:30:45+08:00
+Request 2:
+Response from backend server on port 9002 at 2023-07-20T10:30:45+08:00
+Request 3:
+Response from backend server on port 9003 at 2023-07-20T10:30:45+08:00
+Request 4:
+Response from backend server on port 9001 at 2023-07-20T10:30:45+08:00
+Request 5:
+Response from backend server on port 9002 at 2023-07-20T10:30:45+08:00
+Request 6:
+Response from backend server on port 9003 at 2023-07-20T10:30:45+08:00
+```
+
+### 5. 测试加权轮询
+
+修改配置文件，使用加权轮询策略：
+
+```yaml
+services:
+  web-service:
+    load_balancer:
+      strategy: "weighted_round_robin"  # 使用加权轮询策略
+      backends:
+        - url: "http://localhost:9001"
+          weight: 3  # 高权重，接收更多请求
+          active: true
+        - url: "http://localhost:9002"
+          weight: 2  # 中等权重
+          active: true
+        - url: "http://localhost:9003"
+          weight: 1  # 低权重，接收较少请求
+          active: true
+      health_check:
+        enabled: true
+        interval: 10s
+        timeout: 5s
+        path: "/health"
+
+host_rules:
+  - pattern: "localhost"
+    port: 8080
+    target: "web-service"
+```
+
+重启代理服务器并再次测试，你会发现9001端口的服务器接收的请求大约是9003的3倍。
+
+### 6. 测试健康检查
+
+停止其中一个后端服务：
+
+```bash
+kill %1  # 停止9001端口的服务
+```
+
+继续发送请求，你会发现代理服务器会自动检测到9001端口的服务不可用，并将请求分发到其他健康的服务器：
+
+```bash
+for i in {1..6}; do 
+  echo "Request $i:"
+  curl -s http://localhost:8080/
+  echo
+done
+```
+
+预期输出：
+
+```
+Request 1:
+Response from backend server on port 9002 at 2023-07-20T10:35:15+08:00
+Request 2:
+Response from backend server on port 9003 at 2023-07-20T10:35:15+08:00
+Request 3:
+Response from backend server on port 9002 at 2023-07-20T10:35:15+08:00
+Request 4:
+Response from backend server on port 9003 at 2023-07-20T10:35:15+08:00
+Request 5:
+Response from backend server on port 9002 at 2023-07-20T10:35:15+08:00
+Request 6:
+Response from backend server on port 9003 at 2023-07-20T10:35:15+08:00
+```
+
+### 7. 监控和日志
+
+代理服务器会记录负载均衡相关的日志，包括：
+
+- 后端服务器的健康状态变化
+- 请求分发情况
+- 负载均衡策略选择
+
+查看日志：
+
+```bash
+tail -f proxy.log
+```
+
+## 故障排除
 
 常见问题及解决方案：
 

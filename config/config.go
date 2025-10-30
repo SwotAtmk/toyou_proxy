@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -46,8 +47,9 @@ type RouteRule struct {
 
 // Service 服务定义
 type Service struct {
-	URL       string `yaml:"url"`
-	ProxyHost string `yaml:"proxy_host,omitempty"` // 反向代理时使用的Host头，可选
+	URL          string              `yaml:"url"`
+	ProxyHost    string              `yaml:"proxy_host,omitempty"`    // 反向代理时使用的Host头，可选
+	LoadBalancer *LoadBalancerConfig `yaml:"load_balancer,omitempty"` // 负载均衡配置，可选
 }
 
 // Middleware 中间件配置
@@ -223,4 +225,54 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// LoadBalancerStrategy 负载均衡策略类型
+type LoadBalancerStrategy string
+
+const (
+	// RoundRobin 轮询策略
+	RoundRobin LoadBalancerStrategy = "round_robin"
+	// WeightedRoundRobin 加权轮询策略
+	WeightedRoundRobin LoadBalancerStrategy = "weighted_round_robin"
+	// IPHash IP哈希策略
+	IPHash LoadBalancerStrategy = "ip_hash"
+	// LeastConnections 最少连接策略
+	LeastConnections LoadBalancerStrategy = "least_connections"
+	// ResponseTime 最短响应时间策略
+	ResponseTime LoadBalancerStrategy = "response_time"
+	// Random 随机策略
+	Random LoadBalancerStrategy = "random"
+	// WeightedRandom 加权随机策略
+	WeightedRandom LoadBalancerStrategy = "weighted_random"
+)
+
+// LoadBalancerBackend 后端服务器配置
+type LoadBalancerBackend struct {
+	URL         string             `yaml:"url"`          // 后端服务器URL
+	Weight      int                `yaml:"weight"`       // 权重（用于加权策略）
+	HealthCheck *HealthCheckConfig `yaml:"health_check"` // 健康检查配置
+}
+
+// HealthCheckConfig 健康检查配置
+type HealthCheckConfig struct {
+	Enabled  bool          `yaml:"enabled"`
+	Interval time.Duration `yaml:"interval"`
+	Timeout  time.Duration `yaml:"timeout"`
+	Path     string        `yaml:"path"`
+}
+
+// SessionAffinityConfig 会话保持配置
+type SessionAffinityConfig struct {
+	Enabled    bool          `yaml:"enabled"`
+	Timeout    time.Duration `yaml:"timeout"`
+	CookieName string        `yaml:"cookie_name"`
+}
+
+// LoadBalancerConfig 负载均衡器配置
+type LoadBalancerConfig struct {
+	Strategy        LoadBalancerStrategy   `yaml:"strategy"`         // 负载均衡策略
+	Backends        []LoadBalancerBackend  `yaml:"backends"`         // 后端服务器列表
+	HealthCheck     *HealthCheckConfig     `yaml:"health_check"`     // 全局健康检查配置
+	SessionAffinity *SessionAffinityConfig `yaml:"session_affinity"` // 会话保持配置
 }
