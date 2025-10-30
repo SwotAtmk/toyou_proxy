@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"sync"
 	"fmt"
 	"log"
+	"sync"
 )
 
 // DefaultMiddlewareChain 默认中间件链实现
@@ -23,7 +23,7 @@ func NewMiddlewareChain() MiddlewareChain {
 func (dmc *DefaultMiddlewareChain) Add(middleware Middleware) {
 	dmc.mu.Lock()
 	defer dmc.mu.Unlock()
-	
+
 	dmc.middlewares = append(dmc.middlewares, middleware)
 	log.Printf("Added middleware '%s' to chain", middleware.Name())
 }
@@ -32,7 +32,7 @@ func (dmc *DefaultMiddlewareChain) Add(middleware Middleware) {
 func (dmc *DefaultMiddlewareChain) Execute(ctx *Context) bool {
 	dmc.mu.RLock()
 	defer dmc.mu.RUnlock()
-	
+
 	for _, middleware := range dmc.middlewares {
 		log.Printf("Executing middleware '%s'", middleware.Name())
 		if !middleware.Handle(ctx) {
@@ -40,7 +40,7 @@ func (dmc *DefaultMiddlewareChain) Execute(ctx *Context) bool {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -48,7 +48,7 @@ func (dmc *DefaultMiddlewareChain) Execute(ctx *Context) bool {
 func (dmc *DefaultMiddlewareChain) GetMiddlewareNames() []string {
 	dmc.mu.RLock()
 	defer dmc.mu.RUnlock()
-	
+
 	names := make([]string, len(dmc.middlewares))
 	for i, middleware := range dmc.middlewares {
 		names[i] = middleware.Name()
@@ -56,11 +56,22 @@ func (dmc *DefaultMiddlewareChain) GetMiddlewareNames() []string {
 	return names
 }
 
+// GetMiddlewares 获取中间件列表
+func (dmc *DefaultMiddlewareChain) GetMiddlewares() []Middleware {
+	dmc.mu.RLock()
+	defer dmc.mu.RUnlock()
+
+	// 返回中间件副本以避免外部修改
+	middlewares := make([]Middleware, len(dmc.middlewares))
+	copy(middlewares, dmc.middlewares)
+	return middlewares
+}
+
 // Remove 从链中移除中间件
 func (dmc *DefaultMiddlewareChain) Remove(name string) error {
 	dmc.mu.Lock()
 	defer dmc.mu.Unlock()
-	
+
 	for i, middleware := range dmc.middlewares {
 		if middleware.Name() == name {
 			dmc.middlewares = append(dmc.middlewares[:i], dmc.middlewares[i+1:]...)
@@ -68,7 +79,7 @@ func (dmc *DefaultMiddlewareChain) Remove(name string) error {
 			return nil
 		}
 	}
-	
+
 	return fmt.Errorf("middleware '%s' not found in chain", name)
 }
 
@@ -76,7 +87,7 @@ func (dmc *DefaultMiddlewareChain) Remove(name string) error {
 func (dmc *DefaultMiddlewareChain) Clear() {
 	dmc.mu.Lock()
 	defer dmc.mu.Unlock()
-	
+
 	dmc.middlewares = make([]Middleware, 0)
 	log.Println("Cleared middleware chain")
 }
@@ -85,13 +96,13 @@ func (dmc *DefaultMiddlewareChain) Clear() {
 func (dmc *DefaultMiddlewareChain) GetMiddleware(name string) (Middleware, bool) {
 	dmc.mu.RLock()
 	defer dmc.mu.RUnlock()
-	
+
 	for _, middleware := range dmc.middlewares {
 		if middleware.Name() == name {
 			return middleware, true
 		}
 	}
-	
+
 	return nil, false
 }
 
@@ -99,7 +110,7 @@ func (dmc *DefaultMiddlewareChain) GetMiddleware(name string) (Middleware, bool)
 func (dmc *DefaultMiddlewareChain) Size() int {
 	dmc.mu.RLock()
 	defer dmc.mu.RUnlock()
-	
+
 	return len(dmc.middlewares)
 }
 
@@ -107,11 +118,11 @@ func (dmc *DefaultMiddlewareChain) Size() int {
 func (dmc *DefaultMiddlewareChain) InsertAt(index int, middleware Middleware) error {
 	dmc.mu.Lock()
 	defer dmc.mu.Unlock()
-	
+
 	if index < 0 || index > len(dmc.middlewares) {
 		return fmt.Errorf("index %d out of bounds for middleware chain of size %d", index, len(dmc.middlewares))
 	}
-	
+
 	dmc.middlewares = append(dmc.middlewares[:index], append([]Middleware{middleware}, dmc.middlewares[index:]...)...)
 	log.Printf("Inserted middleware '%s' at position %d", middleware.Name(), index)
 	return nil

@@ -150,6 +150,14 @@ func (ph *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 创建动态中间件链
 	dynamicMiddlewareChain := ph.createDynamicMiddlewareChain(hostRule, routeRule)
 
+	// 获取缓存中间件实例并存储在上下文中
+	for _, mw := range dynamicMiddlewareChain.GetMiddlewares() {
+		if mw.Name() == "cache" {
+			ctx.Set("cache_middleware", mw)
+			break
+		}
+	}
+
 	// 执行中间件链
 	if !dynamicMiddlewareChain.Execute(ctx) {
 		if ctx.StatusCode != 0 {
@@ -517,6 +525,67 @@ func (ph *ProxyHandler) createReverseProxy(service *config.Service, ctx *middlew
 
 			// 禁用缓冲（适用于某些代理服务器）
 			resp.Header.Set("X-Accel-Buffering", "no")
+		}
+
+		// 检查是否需要缓存响应
+		if ctx != nil && ctx.Request.Method == http.MethodGet {
+			if cacheMiss, hasCacheMiss := ctx.Get("cache_miss"); hasCacheMiss && cacheMiss.(bool) {
+				if cacheKey, hasCacheKey := ctx.Get("cache_key"); hasCacheKey {
+					// 检查响应状态码，只缓存成功的响应
+					if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+						// 检查响应头中的缓存控制指令
+						cacheControl := resp.Header.Get("Cache-Control")
+						if cacheControl == "" || (!strings.Contains(strings.ToLower(cacheControl), "no-store") &&
+							!strings.Contains(strings.ToLower(cacheControl), "no-cache")) {
+							// 读取响应体
+							body, err := io.ReadAll(resp.Body)
+							if err != nil {
+								return err
+							}
+							resp.Body.Close()
+
+							// 从上下文中获取缓存中间件实例
+							if cacheMiddleware, exists := ctx.Get("cache_middleware"); exists {
+								// 使用接口类型，不依赖具体实现
+								if cm, ok := cacheMiddleware.(interface {
+									CalculateTTL(headers http.Header) int64
+									SaveToCache(key string, entry interface{}) error
+									ExtractVaryValues(r *http.Request) map[string]string
+								}); ok {
+									// 计算TTL
+									ttl := cm.CalculateTTL(resp.Header)
+									if ttl > 0 {
+										// 创建缓存条目
+										entry := map[string]interface{}{
+											"StatusCode": resp.StatusCode,
+											"Headers":    make(http.Header),
+											"Body":       body,
+											"Expiry":     time.Now().Add(time.Duration(ttl) * time.Second),
+											"Vary":       cm.ExtractVaryValues(ctx.Request),
+										}
+
+										// 复制响应头
+										for key, values := range resp.Header {
+											entry["Headers"].(http.Header)[key] = values
+										}
+
+										// 保存到缓存
+										if err := cm.SaveToCache(cacheKey.(string), entry); err != nil {
+											// 记录错误但不影响响应
+											fmt.Printf("Failed to save to cache: %v\n", err)
+										}
+									}
+								}
+							}
+
+							// 重新设置响应体
+							resp.Body = io.NopCloser(bytes.NewReader(body))
+							resp.ContentLength = int64(len(body))
+							resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+						}
+					}
+				}
+			}
 		}
 
 		// 从上下文中获取替换规则

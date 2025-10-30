@@ -41,6 +41,7 @@ Toyou Proxy 是一个基于 Go 语言开发的反向代理服务器，采用"约
   - `logging`：请求日志记录中间件
   - `replace`：响应内容替换中间件
   - `dynamic_route`：动态路由中间件
+  - `websocket`：WebSocket代理中间件
 
 - **自定义中间件**：支持开发自定义中间件，只需实现 `Middleware` 接口
 
@@ -71,6 +72,14 @@ Toyou Proxy 是一个基于 Go 语言开发的反向代理服务器，采用"约
 - **动态服务**：支持从服务发现系统动态获取服务列表
 - **健康检查**：支持后端服务健康检查
 - **负载均衡**：支持多种负载均衡策略
+
+### 7. WebSocket代理
+
+- **协议转换**：支持HTTP到WebSocket协议的自动转换
+- **双向通信**：支持客户端和服务器之间的双向实时通信
+- **连接保持**：支持长连接保持和心跳机制
+- **路径匹配**：支持基于路径的WebSocket路由
+- **自定义头部**：支持自定义WebSocket握手头部
 
 ## 快速开始
 
@@ -305,6 +314,11 @@ middlewares:
       exposed_headers: ["X-Total-Count"]
       allow_credentials: true
       max_age: 86400
+  
+  - name: "websocket"
+    enabled: true
+    config:
+      path_patterns: ["/ws", "/api/ws"]  # WebSocket路径模式
 ```
 
 #### 中间件服务注册
@@ -967,6 +981,240 @@ func (drm *DynamicRouteMiddleware) Handle(context *middleware.Context) bool {
 3. **健康检查**：集成服务健康检查，自动路由到健康的服务实例
 4. **路由规则**：支持更复杂的路由规则配置
 5. **路由统计**：收集路由统计数据，用于分析和优化路由策略
+
+## WebSocket代理中间件
+
+WebSocket代理中间件是Toyou Proxy的重要功能之一，它允许代理服务器处理WebSocket连接，实现客户端和后端WebSocket服务器之间的双向通信。
+
+### 功能概述
+
+WebSocket代理中间件通过以下方式工作：
+
+1. **协议检测**：自动检测WebSocket升级请求
+2. **协议转换**：将HTTP连接升级为WebSocket连接
+3. **双向代理**：在客户端和服务器之间建立双向数据通道
+4. **连接保持**：维护长连接，支持心跳机制
+5. **错误处理**：提供完善的错误处理和连接恢复机制
+
+### 配置参数
+
+WebSocket代理中间件支持以下配置参数：
+
+| 参数名 | 类型 | 默认值 | 描述 |
+|--------|------|--------|------|
+| `path_patterns` | []string | `["/ws"]` | WebSocket路径模式列表 |
+| `allowed_origins` | []string | `["*"]` | 允许的来源列表 |
+| `ping_interval` | int | `30` | 心跳间隔（秒） |
+| `pong_wait` | int | `60` | 等待pong响应的时间（秒） |
+| `write_wait` | int | `10` | 写入超时时间（秒） |
+| `max_message_size` | int64 | `512` | 最大消息大小（KB） |
+
+### 配置示例
+
+#### 基本配置
+
+```yaml
+middlewares:
+  - name: "websocket"
+    enabled: true
+    config:
+      path_patterns: ["/ws", "/api/ws"]
+```
+
+#### 完整配置
+
+```yaml
+middlewares:
+  - name: "websocket"
+    enabled: true
+    config:
+      path_patterns: ["/ws", "/api/ws", "/socket.io"]
+      allowed_origins: ["https://example.com", "https://app.example.com"]
+      ping_interval: 30
+      pong_wait: 60
+      write_wait: 10
+      max_message_size: 1024
+```
+
+#### 域名和路由配置
+
+```yaml
+host_rules:
+  - pattern: "ws.example.com"
+    port: 8080
+    target: "websocket-service"
+    middlewares: ["websocket"]
+
+route_rules:
+  - pattern: "/ws/*"
+    target: "websocket-service"
+    middlewares: ["websocket"]
+
+services:
+  websocket-service:
+    url: "ws://localhost:8081"  # 注意使用ws://或wss://协议
+```
+
+### 使用示例
+
+#### 简单聊天应用
+
+```yaml
+# 配置文件
+host_rules:
+  - pattern: "chat.example.com"
+    port: 8080
+    target: "chat-service"
+    middlewares: ["websocket"]
+
+services:
+  chat-service:
+    url: "ws://localhost:3001"
+
+middlewares:
+  - name: "websocket"
+    enabled: true
+    config:
+      path_patterns: ["/chat"]
+      allowed_origins: ["https://chat.example.com"]
+```
+
+```javascript
+// 客户端代码
+const ws = new WebSocket('wss://chat.example.com/chat');
+
+ws.onopen = function(event) {
+    console.log('Connected to chat server');
+    ws.send(JSON.stringify({
+        type: 'join',
+        room: 'general',
+        username: 'user123'
+    }));
+};
+
+ws.onmessage = function(event) {
+    const message = JSON.parse(event.data);
+    console.log('Received message:', message);
+    // 处理聊天消息
+};
+
+ws.onclose = function(event) {
+    console.log('Disconnected from chat server');
+};
+
+ws.onerror = function(error) {
+    console.error('WebSocket error:', error);
+};
+```
+
+#### 实时数据推送
+
+```yaml
+# 配置文件
+route_rules:
+  - pattern: "/api/realtime/*"
+    target: "data-service"
+    middlewares: ["websocket"]
+
+services:
+  data-service:
+    url: "ws://localhost:4001"
+
+middlewares:
+  - name: "websocket"
+    enabled: true
+    config:
+      path_patterns: ["/api/realtime"]
+      ping_interval: 15  # 更频繁的心跳
+```
+
+### 实现原理
+
+WebSocket代理中间件的核心实现逻辑如下：
+
+```go
+// Handle 处理WebSocket代理逻辑
+func (wsm *WebSocketMiddleware) Handle(context *middleware.Context) bool {
+    // 检查是否是WebSocket升级请求
+    if !isWebSocketUpgrade(context.Request) {
+        return true // 不是WebSocket请求，继续处理
+    }
+
+    // 获取目标服务URL
+    targetURL := getTargetURL(context)
+    
+    // 创建WebSocket代理
+    proxy := &WebSocketProxy{
+        TargetURL: targetURL,
+        Config:    wsm.config,
+    }
+    
+    // 执行代理
+    return proxy.ProxyWebSocket(context.Response, context.Request)
+}
+```
+
+### 连接流程
+
+1. **客户端请求**：客户端发送HTTP升级请求到代理服务器
+2. **协议检测**：代理服务器检测WebSocket升级请求
+3. **目标连接**：代理服务器连接到后端WebSocket服务器
+4. **协议升级**：代理服务器与客户端和服务器分别完成WebSocket握手
+5. **数据转发**：代理服务器在客户端和服务器之间双向转发数据
+6. **连接关闭**：任一端关闭连接时，代理服务器关闭另一端连接
+
+### 错误处理
+
+WebSocket代理中间件实现了健壮的错误处理机制：
+
+1. **连接失败**：当无法连接到目标服务器时，返回适当的HTTP错误
+2. **协议错误**：当WebSocket协议出现错误时，记录日志并关闭连接
+3. **超时处理**：实现读写超时机制，防止连接挂起
+4. **资源清理**：连接关闭时正确清理所有相关资源
+
+### 性能优化
+
+为了提高性能，WebSocket代理中间件实现了以下优化：
+
+1. **连接池**：复用到目标服务器的连接，减少连接建立开销
+2. **缓冲区管理**：优化读写缓冲区大小，提高数据传输效率
+3. **并发控制**：使用Go的并发特性处理多个WebSocket连接
+4. **内存复用**：复用内存缓冲区，减少垃圾回收压力
+
+### 监控和日志
+
+WebSocket代理中间件提供了丰富的监控和日志功能：
+
+1. **连接统计**：记录当前活跃连接数、总连接数等统计信息
+2. **错误日志**：记录连接错误、协议错误等异常情况
+3. **性能指标**：记录连接建立时间、数据传输量等性能指标
+4. **调试日志**：提供详细的调试日志，便于问题排查
+
+### 安全考虑
+
+WebSocket代理中间件实现了以下安全措施：
+
+1. **来源验证**：验证请求来源，防止跨站WebSocket劫持
+2. **协议限制**：只允许有效的WebSocket协议升级
+3. **消息大小限制**：限制消息大小，防止内存耗尽攻击
+4. **速率限制**：可与其他中间件结合，实现连接速率限制
+
+### 最佳实践
+
+1. **路径设计**：使用明确的WebSocket路径，如`/ws`、`/api/ws`
+2. **心跳机制**：配置适当的心跳间隔，保持连接活跃
+3. **错误处理**：在客户端实现完善的错误处理和重连机制
+4. **资源管理**：监控连接数和资源使用情况，防止资源泄漏
+5. **安全配置**：限制允许的来源，使用安全的WebSocket协议(wss://)
+
+### 故障排除
+
+常见问题及解决方案：
+
+1. **连接失败**：检查目标服务器URL和网络连接
+2. **协议错误**：确保客户端发送正确的WebSocket升级请求
+3. **数据丢失**：检查缓冲区大小和超时设置
+4. **性能问题**：监控连接数和数据传输量，优化配置参数
 
 ## 插件系统
 

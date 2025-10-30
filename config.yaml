@@ -28,6 +28,17 @@ middlewares:
       allowed_origins: ["*"]
       allowed_methods: ["GET", "POST", "PUT", "DELETE"]
       allowed_headers: ["Content-Type", "Authorization"]
+  
+  # 缓存中间件 - 响应缓存
+  - name: "cache"
+    enabled: true
+    config:
+      cache_dir: "./cache/responses"
+      default_ttl: 300  # 5分钟
+      max_cache_size: 104857600  # 100MB
+      cache_key_headers: ["Authorization", "Accept-Language"]
+      cache_control: true
+      vary_headers: ["Accept", "Accept-Language", "Authorization"]
 
 # 高级配置
 advanced:

@@ -94,6 +94,9 @@ type MiddlewareChain interface {
 
 	// GetMiddlewareNames 获取中间件名称列表
 	GetMiddlewareNames() []string
+
+	// GetMiddlewares 获取中间件列表
+	GetMiddlewares() []Middleware
 }
 
 // MiddlewareFactory 中间件工厂接口
